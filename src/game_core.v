@@ -1,4 +1,4 @@
-// The game core: a growing Snake game (up to 6 segments) optimized with unrolled logic.
+// The game core: a growing Snake game with fixed bit-widths and clean contiguous segments.
 `default_nettype none
 
 module game_core #(
@@ -55,10 +55,10 @@ module game_core #(
     reg [1:0] pending_dir;
     reg       has_pending;
     
-    // Snake parts: Head + 5 body segments (grows from length 2 up to 6)
-    reg [5:0] head_x, b1_x, b2_x, b3_x, b4_x, b5_x;
-    reg [4:0] head_y, b1_y, b2_y, b3_y, b4_y, b5_y;
-    reg [2:0] length; // 2 to 6 segments
+    // Snake parts: Head + 3 body segments
+    reg [5:0] head_x, b1_x, b2_x, b3_x;
+    reg [4:0] head_y, b1_y, b2_y, b3_y;
+    reg [2:0] length; // 3-bit width to cleanly handle values up to 4 without truncation warnings
 
     // LFSR for food generation
     reg [15:0] lfsr;
@@ -85,10 +85,8 @@ module game_core #(
             head_x      <= 6'd20; head_y <= 5'd15;
             b1_x        <= 6'd19; b1_y   <= 5'd15;
             b2_x        <= 6'd18; b2_y   <= 5'd15;
-            b3_x        <= 6'd18; b3_y   <= 5'd15;
-            b4_x        <= 6'd18; b4_y   <= 5'd15;
-            b5_x        <= 6'd18; b5_y   <= 5'd15;
-            length      <= 3'd2;  // start small (head + 1 body segment) and grow up to 6!
+            b3_x        <= 6'd17; b3_y   <= 5'd15;
+            length      <= 3'd2;  // start at length 2, grows up to 4
             game_over   <= 1'b0;
             food_x      <= 6'd10;
             food_y      <= 5'd10;
@@ -117,9 +115,7 @@ module game_core #(
                     has_pending <= 1'b0;
                 end
 
-                // Shift body segments forward
-                b5_x <= b4_x; b5_y <= b4_y;
-                b4_x <= b3_x; b4_y <= b3_y;
+                // Shift body segments forward cleanly
                 b3_x <= b2_x; b3_y <= b2_y;
                 b2_x <= b1_x; b2_y <= b1_y;
                 b1_x <= head_x; b1_y <= head_y;
@@ -144,18 +140,16 @@ module game_core #(
                     end
                 endcase
 
-                // Self collision check (unrolled)
+                // Self collision check (using properly sized 3-bit literals)
                 if ((length >= 3'd2 && head_x == b1_x && head_y == b1_y) ||
                     (length >= 3'd3 && head_x == b2_x && head_y == b2_y) ||
-                    (length >= 3'd4 && head_x == b3_x && head_y == b3_y) ||
-                    (length >= 3'd5 && head_x == b4_x && head_y == b4_y) ||
-                    (length >= 3'd6 && head_x == b5_x && head_y == b5_y)) begin
+                    (length >= 3'd4 && head_x == b3_x && head_y == b3_y)) begin
                     game_over <= 1'b1;
                 end
 
-                // Food collision check (grows snake length up to 6)
+                // Food collision check (grows snake length up to 4 safely)
                 if ((head_x == food_x) && (head_y == food_y)) begin
-                    if (length < 3'd6) length <= length + 3'd1;
+                    if (length < 3'd4) length <= length + 3'd1;
                     food_x <= next_food_x;
                     food_y <= next_food_y;
                 end
@@ -171,9 +165,7 @@ module game_core #(
     wire is_b1   = (length >= 3'd2) && (cur_gx == b1_x) && (cur_gy == b1_y);
     wire is_b2   = (length >= 3'd3) && (cur_gx == b2_x) && (cur_gy == b2_y);
     wire is_b3   = (length >= 3'd4) && (cur_gx == b3_x) && (cur_gy == b3_y);
-    wire is_b4   = (length >= 3'd5) && (cur_gx == b4_x) && (cur_gy == b4_y);
-    wire is_b5   = (length >= 3'd6) && (cur_gx == b5_x) && (cur_gy == b5_y);
-    wire is_body = is_b1 || is_b2 || is_b3 || is_b4 || is_b5;
+    wire is_body = is_b1 || is_b2 || is_b3;
     wire is_food = (cur_gx == food_x) && (cur_gy == food_y);
 
     // 5. Colour output: Red on game over, Yellow food, Cyan head, Green body segments, Dark background
