@@ -178,7 +178,6 @@ module game_core #(
         end
     end
 
-
     // 5. Colour output: Red on game over, Yellow food, Cyan head, Green body, Dark background
     assign rgb = !active     ? 6'b00_00_00 :
                  game_over   ? 6'b11_00_00 :
