@@ -1,4 +1,4 @@
-// The game core: a lightweight Snake game optimized to fit strict Tiny Tapeout hardware limits.
+// The game core: a growing Snake game (up to 6 segments) optimized with unrolled logic.
 `default_nettype none
 
 module game_core #(
@@ -49,18 +49,16 @@ module game_core #(
     wire snake_step;
     ip_tick #(.DIV(4)) snake_tick (.clk(clk), .rst_n(rst_n), .en(frame), .tick(snake_step));
 
-    // 3. Grid setup: 640x480 screen -> 40x30 grid of 16x16 pixel cells
+    // 3. Grid setup: 40x30 grid of 16x16 pixel cells
     // Directions: 0=UP, 1=RIGHT, 2=DOWN, 3=LEFT
     reg [1:0] dir;
     reg [1:0] pending_dir;
     reg       has_pending;
-    reg [5:0] head_x;
-    reg [4:0] head_y;
-    reg [1:0] length; // Compact length (max 3 body segments)
-
-    // Minimal body history (0 to 2) to fit Tiny Tapeout area constraints
-    reg [5:0] hist_x [0:2];
-    reg [4:0] hist_y [0:2];
+    
+    // Snake parts: Head + 5 body segments (grows from length 2 up to 6)
+    reg [5:0] head_x, b1_x, b2_x, b3_x, b4_x, b5_x;
+    reg [4:0] head_y, b1_y, b2_y, b3_y, b4_y, b5_y;
+    reg [2:0] length; // 2 to 6 segments
 
     // LFSR for food generation
     reg [15:0] lfsr;
@@ -69,29 +67,33 @@ module game_core #(
         else if (frame) lfsr <= {lfsr[14:0], lfsr[15] ^ lfsr[13] ^ lfsr[12] ^ lfsr[10]};
     end
 
+    // Lightweight food coordinate mapping (zero division/modulo logic)
+    wire [5:0] raw_fx = lfsr[5:0];
+    wire [4:0] raw_fy = lfsr[10:6];
+    wire [5:0] next_food_x = (raw_fx >= 6'd40) ? (raw_fx - 6'd40) : raw_fx;
+    wire [4:0] next_food_y = (raw_fy >= 5'd30) ? (raw_fy - 5'd30) : raw_fy;
+
     reg [5:0] food_x;
     reg [4:0] food_y;
     reg       game_over;
 
-    integer i; // Loop variable for sequential block
     always @(posedge clk) begin
         if (!rst_n) begin
             dir         <= 2'd1; // start moving right
             pending_dir <= 2'd1;
             has_pending <= 1'b0;
-            head_x      <= 6'd20;
-            head_y      <= 5'd15;
-            length      <= 2'd2;  // initial length 2 body segments
+            head_x      <= 6'd20; head_y <= 5'd15;
+            b1_x        <= 6'd19; b1_y   <= 5'd15;
+            b2_x        <= 6'd18; b2_y   <= 5'd15;
+            b3_x        <= 6'd18; b3_y   <= 5'd15;
+            b4_x        <= 6'd18; b4_y   <= 5'd15;
+            b5_x        <= 6'd18; b5_y   <= 5'd15;
+            length      <= 3'd2;  // start small (head + 1 body segment) and grow up to 6!
             game_over   <= 1'b0;
             food_x      <= 6'd10;
             food_y      <= 5'd10;
-            
-            // Spread initial body segments to the left
-            hist_x[0] <= 6'd19; hist_y[0] <= 5'd15;
-            hist_x[1] <= 6'd18; hist_y[1] <= 5'd15;
-            hist_x[2] <= 6'd18; hist_y[2] <= 5'd15;
         end else if (!game_over) begin
-            // Capture button presses into pending buffer
+            // Capture button presses into pending buffer (preventing 180-degree self-reversals)
             if (up_press    && (dir != 2'd2) && (!has_pending || pending_dir != 2'd2)) begin
                 pending_dir <= 2'd0;
                 has_pending <= 1'b1;
@@ -115,15 +117,12 @@ module game_core #(
                     has_pending <= 1'b0;
                 end
 
-                // Shift body history up to 2
-                for (i = 2; i > 0; i = i - 1) begin
-                    if (i < length) begin
-                        hist_x[i] <= hist_x[i-1];
-                        hist_y[i] <= hist_y[i-1];
-                    end
-                end
-                hist_x[0] <= head_x;
-                hist_y[0] <= head_y;
+                // Shift body segments forward
+                b5_x <= b4_x; b5_y <= b4_y;
+                b4_x <= b3_x; b4_y <= b3_y;
+                b3_x <= b2_x; b3_y <= b2_y;
+                b2_x <= b1_x; b2_y <= b1_y;
+                b1_x <= head_x; b1_y <= head_y;
 
                 // Move head based on current direction
                 case (dir)
@@ -145,40 +144,39 @@ module game_core #(
                     end
                 endcase
 
-                // Self collision check up to 2
-                for (i = 0; i < 3; i = i + 1) begin
-                    if ((i < length) && (head_x == hist_x[i]) && (head_y == hist_y[i]))
-                        game_over <= 1'b1;
+                // Self collision check (unrolled)
+                if ((length >= 3'd2 && head_x == b1_x && head_y == b1_y) ||
+                    (length >= 3'd3 && head_x == b2_x && head_y == b2_y) ||
+                    (length >= 3'd4 && head_x == b3_x && head_y == b3_y) ||
+                    (length >= 3'd5 && head_x == b4_x && head_y == b4_y) ||
+                    (length >= 3'd6 && head_x == b5_x && head_y == b5_y)) begin
+                    game_over <= 1'b1;
                 end
 
-                // Food collision check (grows up to length 3)
+                // Food collision check (grows snake length up to 6)
                 if ((head_x == food_x) && (head_y == food_y)) begin
-                    if (length < 2'd3) length <= length + 2'd1;
-                    food_x <= lfsr[5:0] % 6'd40;
-                    food_y <= lfsr[10:6] % 5'd30;
+                    if (length < 3'd6) length <= length + 3'd1;
+                    food_x <= next_food_x;
+                    food_y <= next_food_y;
                 end
             end
         end
     end
 
-    // 4. Pixel grid mapping (16x16 pixel blocks)
+    // 4. Pixel grid mapping (16x16 pixel blocks) - Fully unrolled combinatorial logic (ZERO LOOPS)
     wire [5:0] cur_gx = x[9:4]; 
     wire [4:0] cur_gy = y[9:4]; 
 
     wire is_head = (cur_gx == head_x) && (cur_gy == head_y);
+    wire is_b1   = (length >= 3'd2) && (cur_gx == b1_x) && (cur_gy == b1_y);
+    wire is_b2   = (length >= 3'd3) && (cur_gx == b2_x) && (cur_gy == b2_y);
+    wire is_b3   = (length >= 3'd4) && (cur_gx == b3_x) && (cur_gy == b3_y);
+    wire is_b4   = (length >= 3'd5) && (cur_gx == b4_x) && (cur_gy == b4_y);
+    wire is_b5   = (length >= 3'd6) && (cur_gx == b5_x) && (cur_gy == b5_y);
+    wire is_body = is_b1 || is_b2 || is_b3 || is_b4 || is_b5;
     wire is_food = (cur_gx == food_x) && (cur_gy == food_y);
 
-    integer j; // Separate loop variable for combinatorial block
-    reg is_body;
-    always @* begin
-        is_body = 1'b0;
-        for (j = 0; j < 3; j = j + 1) begin
-            if ((j < length) && (cur_gx == hist_x[j]) && (cur_gy == hist_y[j]))
-                is_body = 1'b1;
-        end
-    end
-
-    // 5. Colour output: Red on game over, Yellow food, Cyan head, Green body, Dark background
+    // 5. Colour output: Red on game over, Yellow food, Cyan head, Green body segments, Dark background
     assign rgb = !active     ? 6'b00_00_00 :
                  game_over   ? 6'b11_00_00 :
                  is_food     ? 6'b11_11_00 :
