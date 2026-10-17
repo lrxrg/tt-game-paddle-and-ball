@@ -1,4 +1,4 @@
-// The game core: an ultra-compact Snake game designed to fit Tiny Tapeout hardware limits.
+// The game core: a lightweight Snake game optimized to fit strict Tiny Tapeout hardware limits.
 `default_nettype none
 
 module game_core #(
@@ -56,11 +56,11 @@ module game_core #(
     reg       has_pending;
     reg [5:0] head_x;
     reg [4:0] head_y;
-    reg [3:0] length; // Compact length (max 8)
+    reg [1:0] length; // Compact length (max 3 body segments)
 
-    // Ultra-compact body history (0 to 7) to fit Tiny Tapeout area constraints
-    reg [5:0] hist_x [0:7];
-    reg [4:0] hist_y [0:7];
+    // Minimal body history (0 to 2) to fit Tiny Tapeout area constraints
+    reg [5:0] hist_x [0:2];
+    reg [4:0] hist_y [0:2];
 
     // LFSR for food generation
     reg [15:0] lfsr;
@@ -81,7 +81,7 @@ module game_core #(
             has_pending <= 1'b0;
             head_x      <= 6'd20;
             head_y      <= 5'd15;
-            length      <= 4'd4;  // initial length 4
+            length      <= 2'd2;  // initial length 2 body segments
             game_over   <= 1'b0;
             food_x      <= 6'd10;
             food_y      <= 5'd10;
@@ -89,12 +89,7 @@ module game_core #(
             // Spread initial body segments to the left
             hist_x[0] <= 6'd19; hist_y[0] <= 5'd15;
             hist_x[1] <= 6'd18; hist_y[1] <= 5'd15;
-            hist_x[2] <= 6'd17; hist_y[2] <= 5'd15;
-            hist_x[3] <= 6'd16; hist_y[3] <= 5'd15;
-            for (i = 4; i < 8; i = i + 1) begin
-                hist_x[i] <= 6'd16;
-                hist_y[i] <= 5'd15;
-            end
+            hist_x[2] <= 6'd18; hist_y[2] <= 5'd15;
         end else if (!game_over) begin
             // Capture button presses into pending buffer
             if (up_press    && (dir != 2'd2) && (!has_pending || pending_dir != 2'd2)) begin
@@ -120,8 +115,8 @@ module game_core #(
                     has_pending <= 1'b0;
                 end
 
-                // Shift body history up to 7
-                for (i = 7; i > 0; i = i - 1) begin
+                // Shift body history up to 2
+                for (i = 2; i > 0; i = i - 1) begin
                     if (i < length) begin
                         hist_x[i] <= hist_x[i-1];
                         hist_y[i] <= hist_y[i-1];
@@ -150,15 +145,15 @@ module game_core #(
                     end
                 endcase
 
-                // Self collision check up to 7
-                for (i = 0; i < 7; i = i + 1) begin
-                    if ((i < length - 4'd1) && (head_x == hist_x[i]) && (head_y == hist_y[i]))
+                // Self collision check up to 2
+                for (i = 0; i < 3; i = i + 1) begin
+                    if ((i < length) && (head_x == hist_x[i]) && (head_y == hist_y[i]))
                         game_over <= 1'b1;
                 end
 
-                // Food collision check (grows up to length 8)
+                // Food collision check (grows up to length 3)
                 if ((head_x == food_x) && (head_y == food_y)) begin
-                    if (length < 4'd8) length <= length + 4'd1;
+                    if (length < 2'd3) length <= length + 2'd1;
                     food_x <= lfsr[5:0] % 6'd40;
                     food_y <= lfsr[10:6] % 5'd30;
                 end
@@ -177,7 +172,7 @@ module game_core #(
     reg is_body;
     always @* begin
         is_body = 1'b0;
-        for (j = 0; j < 8; j = j + 1) begin
+        for (j = 0; j < 3; j = j + 1) begin
             if ((j < length) && (cur_gx == hist_x[j]) && (cur_gy == hist_y[j]))
                 is_body = 1'b1;
         end
